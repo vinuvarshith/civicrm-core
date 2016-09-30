@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Note that this installer has been based of the SilverStripe installer.
+ * Note that this instdaller has been based of the SilverStripe installer.
  * You can get more information from the SilverStripe Website at
  * http://www.silverstripe.com/.
  *
