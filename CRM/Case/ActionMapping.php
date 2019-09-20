@@ -54,8 +54,8 @@ class CRM_Case_ActionMapping extends \Civi\ActionSchedule\Mapping {
       'entity_value_label' => ts('Case Type'),
       'entity_status' => 'case_status',
       'entity_status_label' => ts('Case Status'),
-      'entity_date_start' => 'case_start_date',
-      'entity_date_end' => 'case_end_date',
+      'entity_date_start' => 'start_date',
+      'entity_date_end' => 'end_date',
     )));
   }
 
@@ -82,6 +82,17 @@ class CRM_Case_ActionMapping extends \Civi\ActionSchedule\Mapping {
    */
   public function getRecipientTypes() {
     return array('case_roles' => 'Case Roles');
+  }
+
+  /**
+   * @inheritdoc
+   */
+  public function getDateFields() {
+    return [
+      'start_date' => ts('Case Start Date'),
+      'end_date' => ts('Case End Date'),
+      'case_status' => ts('Case Status Change'),
+    ];
   }
 
   /**
@@ -126,7 +137,40 @@ class CRM_Case_ActionMapping extends \Civi\ActionSchedule\Mapping {
       throw new CRM_Core_Exception("Invalid date field");
     }
 
-    $query['casDateField'] = $schedule->start_action_date;
+    if ($schedule->start_action_date == 'case_status') {
+      // For this case, we use activity of type 'Change Case Status' and check if the case status has been changed
+      // from an indifferent status to the one configured in scheduled reminder.
+      $query->join('cac', "INNER JOIN civicrm_case_activity cac ON cac.case_id = c.id");
+      $query->where("cac.id = (SELECT MAX(cac2.id) FROM civicrm_case_activity cac2 WHERE cac2.case_id = c.id)");
+
+      $query->join('act', "INNER JOIN civicrm_activity act ON act.id = cac.activity_id");
+      $query->join('opt', "INNER JOIN civicrm_option_value opt ON opt.value = act.activity_type_id");
+      $query->join('opg', "INNER JOIN civicrm_option_group opg ON opg.id = opt.option_group_id");
+      $query->where("opt.name = 'Change Case Status'");
+      $query->where("opg.name = 'activity_type'");
+
+      // If start condition is 'after' we check for completed activity
+      // and if 'before' we check for scheduled activity.
+      if ($schedule->start_action_condition == 'after') {
+        $activityStatus = 'Completed';
+      }
+      else {
+        $activityStatus = 'Scheduled';
+      }
+
+      // Subquery to check for activity status.
+      $subQuery = \CRM_Utils_SQL_Select::from("civicrm_option_value opt2")->select('opt2.value');
+      $subQuery->join('opg2', 'INNER JOIN civicrm_option_group opg2 ON opg2.id = opt2.option_group_id');
+      $subQuery->where("opt2.name = @activityStatus")->param('activityStatus', $activityStatus);
+      $subQuery->where("opg2.name = 'activity_status'");
+      $query->where("act.status_id = (" . $subQuery->toSQL() . ")");
+
+      $query['casDateField'] = 'act.activity_date_time';
+    }
+    else {
+      $query['casDateField'] = 'c.' . $schedule->start_action_date;
+    }
+
     $query['casAddlCheckFrom'] = 'civicrm_case c';
     $query['casContactIdField'] = 'ct.id';
     $query['casEntityIdField'] = 'r.case_id';
