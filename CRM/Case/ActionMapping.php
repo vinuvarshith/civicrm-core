@@ -35,8 +35,6 @@ class CRM_Case_ActionMapping extends \Civi\ActionSchedule\Mapping {
   /**
    * The value for civicrm_action_schedule.mapping_id which identifies the
    * "Case" mapping.
-   *
-   * Note: This value is chosen to match legacy DB IDs.
    */
   const CASE_MAPPING_ID = 99;
 
@@ -46,7 +44,7 @@ class CRM_Case_ActionMapping extends \Civi\ActionSchedule\Mapping {
    * @param \Civi\ActionSchedule\Event\MappingRegisterEvent $registrations
    */
   public static function onRegisterActionMappings(\Civi\ActionSchedule\Event\MappingRegisterEvent $registrations) {
-    $registrations->register(CRM_Case_ActionMapping::create(array(
+    $registrations->register(CRM_Case_ActionMapping::create([
       'id' => CRM_Case_ActionMapping::CASE_MAPPING_ID,
       'entity' => 'civicrm_case',
       'entity_label' => ts('Case'),
@@ -56,7 +54,7 @@ class CRM_Case_ActionMapping extends \Civi\ActionSchedule\Mapping {
       'entity_status_label' => ts('Case Status'),
       'entity_date_start' => 'start_date',
       'entity_date_end' => 'end_date',
-    )));
+    ]));
   }
 
   /**
@@ -64,24 +62,24 @@ class CRM_Case_ActionMapping extends \Civi\ActionSchedule\Mapping {
    */
   public function getRecipientListing($type) {
     if ($type == 'case_roles') {
-      $result = civicrm_api3('RelationshipType', 'get', array(
+      $result = civicrm_api3('RelationshipType', 'get', [
         'sequential' => 1,
-        'options' => array('limit' => 0, 'sort' => "label_b_a"),
-      ))['values'];
-      $cRoles = array();
+        'options' => ['limit' => 0, 'sort' => "label_b_a"],
+      ])['values'];
+      $cRoles = [];
       foreach ($result as $each) {
         $cRoles[$each['id']] = $each['label_b_a'];
       }
       return $cRoles;
     }
-    return array();
+    return [];
   }
 
   /**
    * @inheritdoc
    */
   public function getRecipientTypes() {
-    return array('case_roles' => 'Case Roles');
+    return ['case_roles' => 'Case Roles'];
   }
 
   /**
@@ -91,7 +89,7 @@ class CRM_Case_ActionMapping extends \Civi\ActionSchedule\Mapping {
     return [
       'start_date' => ts('Case Start Date'),
       'end_date' => ts('Case End Date'),
-      'case_status' => ts('Case Status Change'),
+      'case_status_change_date' => ts('On Case Status Change'),
     ];
   }
 
@@ -102,24 +100,19 @@ class CRM_Case_ActionMapping extends \Civi\ActionSchedule\Mapping {
     $selectedValues = (array) \CRM_Utils_Array::explodePadded($schedule->entity_value);
     $selectedStatuses = (array) \CRM_Utils_Array::explodePadded($schedule->entity_status);
 
-    $query = \CRM_Utils_SQL_Select::from("civicrm_case c")->param($defaultParams);
+    $query = \CRM_Utils_SQL_Select::from("{$this->entity} c")->param($defaultParams);
     $query->join('r', "INNER JOIN civicrm_relationship r ON c.id = r.case_id");
     $query->join('cs', "INNER JOIN civicrm_contact ct ON r.contact_id_b = ct.id");
     $query->join('ce', "INNER JOIN civicrm_email ce ON ce.contact_id = ct.id");
 
     if (!empty($selectedValues)) {
-      $query->where("c.case_type_id IN (#caseId)")
-        ->param('caseId', $selectedValues);
+      $query->where("c.case_type_id IN (#caseTypeId)")
+        ->param('caseTypeId', $selectedValues);
     }
 
     if (!empty($selectedStatuses)) {
       $query->where("c.status_id IN (#selectedStatuses)")
         ->param('selectedStatuses', $selectedStatuses);
-    }
-
-    if (!empty($caseRoles)) {
-      $query->where("r.relationship_type_id IN (#caseRoles)")
-        ->param('caseRoles', $caseRoles);
     }
 
     if ($schedule->recipient_listing && $schedule->limit_to) {
@@ -137,7 +130,7 @@ class CRM_Case_ActionMapping extends \Civi\ActionSchedule\Mapping {
       throw new CRM_Core_Exception("Invalid date field");
     }
 
-    if ($schedule->start_action_date == 'case_status') {
+    if ($schedule->start_action_date == 'case_status_change_date') {
       // For this case, we use activity of type 'Change Case Status' and check if the case status has been changed
       // from an indifferent status to the one configured in scheduled reminder.
       $query->join('cac', "INNER JOIN civicrm_case_activity cac ON cac.case_id = c.id");
@@ -175,7 +168,13 @@ class CRM_Case_ActionMapping extends \Civi\ActionSchedule\Mapping {
     $query['casContactIdField'] = 'ct.id';
     $query['casEntityIdField'] = 'r.case_id';
     $query['casContactTableAlias'] = 'ct';
-    $query->where('r.is_active = 1 AND c.is_deleted = 0');
+
+    // Relationship is active.
+    $today = date('Ymd');
+    $query->where("r.is_active = 1 AND ( r.end_date is NULL OR r.end_date >= {$today} ) )");
+
+    // Case is not deleted.
+    $query->where("c.is_deleted = 0");
 
     return $query;
   }
